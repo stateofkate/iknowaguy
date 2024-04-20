@@ -3,32 +3,41 @@ import datetime
 import csv
 
 
-class
-client = MongoClient("localhost", 27017)
+class parseCSV:
+    def __init__(self, filename):
+        self.filename = filename
 
-db = client.test_database
+    def parse(self):
+        #client = MongoClient("localhost", 27017)
 
-collection = db.test_collection
+        #db = client.test_database
 
-col1_data = []
-allRows = []
+        #collection = db.test_collection
 
-with open("medicalSampleData.csv", newline ='') as csvfile:
-    reader = csv.DictReader(csvfile)
-    for row in reader:
-        col1_data.append(row['SKU ID'])
-csvfile.close()
+        col1_data = []
+        allRows = []
 
-with open("medicalSampleData.csv", newline ='') as csvfile:
-    rowReader = csv.reader(csvfile)
-    for row in rowReader:
-        allRows.append(row)
-csvfile.close()
+        with open("medicalSampleData.csv", newline ='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                col1_data.append(row['SKU ID'])
+        csvfile.close()
 
-col1_SKU_data = set(col1_data)
+        with open("medicalSampleData.csv", newline ='') as csvfile:
+            rowReader = csv.reader(csvfile)
+            for row in rowReader:
+                allRows.append(row)
+        csvfile.close()
 
+        col1_SKU_data = set(col1_data)
 
+        print(col1_SKU_data, allRows)
+        return col1_SKU_data, allRows
 
+if __name__ == '__main__':
+    filename = 'medicalSampleData.csv'
+    parser = parseCSV(filename)
+    parser.parse()
 # get different transcripts
 
 
