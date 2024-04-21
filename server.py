@@ -1,5 +1,6 @@
 import json
 import os
+import agentops
 import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -46,7 +47,7 @@ def make_call(request: Request):
         'phone': rows[0][5],
         'ship_by': rows[0][6],
     }
-    
+
     twilio_client.create_phone_call("+12137994675", "+"+rows[0][5], agent_id)
 
 # Only used for twilio phone call situations
@@ -96,20 +97,21 @@ async def handle_register_call(request: Request):
         print(f"Error in register call: {err}")
         return JSONResponse(status_code=500, content={"message": "Internal Server Error"})
 
-    
+
 
 # Custom LLM Websocket handler, receive audio transcription and send back text response
 @app.websocket("/llm-websocket/{call_id}")
 async def websocket_handler(websocket: WebSocket, call_id: str):
+    agentops.init(os.environ['AGENTOPS_API_KEY'])
     await websocket.accept()
-    
+
     rows = []
     with open('data.csv', 'r') as file:
         reader = csv.reader(file)
         for row in reader:
             rows.append(row)
     rows = rows[1:]
-    
+
     call_info = {
         'sku_id': rows[0][1],
         'vendor': rows[0][3],
@@ -118,9 +120,9 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         'ship_by': rows[0][6],
         'quantity': 15,
     }
-    
+
     llm_client = LlmClient(call_info=call_info)
-    
+
     # Send optional config to Retell server
     config = CustomLlmResponse(
         response_type="config",
@@ -131,7 +133,7 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         response_id=1
     )
     await websocket.send_text(json.dumps(config.__dict__))
-    
+
     # Send first message to signal ready of server
     response_id = 0
     first_event = llm_client.draft_begin_message()
@@ -149,7 +151,7 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             request_json = json.loads(message)
             request: CustomLlmRequest = CustomLlmRequest(**request_json)
             print(json.dumps(request.__dict__, indent=4))
-            
+
             # There are 5 types of interaction_type: call_details, pingpong, update_only, response_required, and reminder_required.
             # Not all of them need to be handled, only response_required and reminder_required.
             if request.interaction_type == "call_details":
@@ -170,3 +172,5 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         print(f"Error in LLM WebSocket: {e}")
     finally:
         print(f"LLM WebSocket connection closed for {call_id}")
+        agentops.end_session('Success!')
+
