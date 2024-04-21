@@ -13,3 +13,8 @@ completion = client.chat.completions.create(
         "======="},
     ]
 )
+
+response = completion.choices[0].message['content']
+
+print(response)
+
