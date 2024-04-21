@@ -3,6 +3,8 @@ import os
 import json
 from custom_types import CustomLlmRequest, CustomLlmResponse, Utterance
 from typing import List
+import agentops
+
 
 begin_sentence = "Hi I'm Max, I'm looking for a quote on an item - can you help me with that?"
 agent_prompt = "Task: You are a procurement agent named Max. Your objective is to get a quote for quantity {quantity} of products with SKU {sku_id}. You are on a call with the distributor named {vendor}. Please ask them for the price of those items, whether or not they're available, and when they can have it shipped to San Francisco. Ask them for an email to send a purchase order. Once you have this info, end the call and tell them you'll get back to them shortly.\n\nConversational Style: Communicate concisely and conversationally. Aim for responses in short, clear prose, ideally under 10 words. This succinct approach helps in maintaining clarity and focus during patient interactions.\n\nPersonality: Your approach should be empathetic and understanding, balancing compassion with maintaining a professional stance on what is best for the patient. It's important to listen actively and empathize without overly agreeing with the patient, ensuring that your professional opinion guides the procurement process. DO NOT ask all your questions at once. Ask one question at a time."
@@ -15,7 +17,8 @@ class LlmClient:
         )
         # set a dict based on the kwargs
         self.call_info = call_info
-    
+
+    @agentops.record_function('draft_begin_message')
     def draft_begin_message(self):
         response = CustomLlmResponse(
             response_id=0,
@@ -24,7 +27,7 @@ class LlmClient:
             end_call=False,
         )
         return response
-    
+
     def convert_transcript_to_openai_messages(self, transcript: List[Utterance]):
         messages = []
         for utterance in transcript:
@@ -79,8 +82,8 @@ class LlmClient:
             },
         ]
         return functions
-    
-    def draft_response(self, request):      
+
+    def draft_response(self, request):
         prompt = self.prepare_prompt(request)
         func_call = {}
         func_arguments = ""
@@ -91,7 +94,7 @@ class LlmClient:
             # Step 2: Add the function into your request
             tools=self.prepare_functions()
         )
-    
+
         for chunk in stream:
             # Step 3: Extract the functions
             if len(chunk.choices) == 0:
@@ -110,7 +113,7 @@ class LlmClient:
                 else:
                     # append argument
                     func_arguments += tool_calls.function.arguments or ""
-            
+
             # Parse transcripts
             if chunk.choices[0].delta.content:
                 response = CustomLlmResponse(
@@ -120,7 +123,7 @@ class LlmClient:
                     end_call=False,
                 )
                 yield response
-        
+
         # Step 4: Call the functions
         if func_call:
             if func_call['func_name'] == "end_call":
