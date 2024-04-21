@@ -54,7 +54,7 @@ def send_email(workbook_path):
         message.attachment = attachment
 
         try:
-            sg = SendGridAPIClient('API_KEY here')
+            sg = SendGridAPIClient('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')
             print(sg)
             response = sg.send(message)
             print(response)
@@ -64,4 +64,4 @@ def send_email(workbook_path):
         except Exception as e:
             print(e.message)
 
-send_email('purchase-order.xlsx')
+

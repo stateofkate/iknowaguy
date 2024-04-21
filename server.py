@@ -11,6 +11,12 @@ from twilio_server import TwilioClient
 from twilio.twiml.voice_response import VoiceResponse
 from retell import Retell
 from retell.resources.call import RegisterCallResponse
+from openai import OpenAI
+from datetime import datetime
+import agentops
+import requests
+from twilio_send_email import send_email, modifyPurchaseOrder
+from fastapi.middleware.cors import CORSMiddleware
 
 from llm_with_func_calling import LlmClient
 # from llm import LlmClient
@@ -22,33 +28,60 @@ load_dotenv(override=True)
 app = FastAPI()
 retell = Retell(api_key=os.environ['RETELL_API_KEY'])
 agent_id = os.environ['RETELL_AGENT_ID']
+agentops.init(os.environ['AGENTOPS_API_KEY'])
+
+origins = [
+    "http://localhost",
+    "http://localhost:8080",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+BEST_QUOTE = None
 
 # Twilio functions
 twilio_client = TwilioClient()
 # twilio_client.create_phone_number(213, agent_id)
-# twilio_client.delete_phone_number("+12133548310")
-# twilio_client.register_phone_agent("+12135681465", agent_id)
-# twilio_client.create_phone_call("+12137994675", "+19496892624", agent_id)
+# twilio_client.delete_phone_number("+12137995062")
+# twilio_client.register_phone_agent("+12137995062", agent_id)
+# twilio_client.create_phone_call("+12137995062", "+19496892624", agent_id)
 
 @app.get("/make-call/")
 def make_call(request: Request):
-    # read data.csv into rows
-    rows = []
-    with open('data.csv', 'r') as file:
-        reader = csv.reader(file)
-        for row in reader:
-            rows.append(row)
-    rows = rows[1:]
+    
+    # get the GET url parameters from request object
+    phone = request.query_params.get('phone')
+    bestQuote = request.query_params.get('bestQuote')
+    print(phone)
+    print(bestQuote)
+    global BEST_QUOTE
+    BEST_QUOTE = bestQuote
+    
+    
+    twilio_client.create_phone_call("+12137995062", "+"+phone, agent_id)
+    print("Call made")
+    return "done"
 
-    call_info = {
-        'sku_id': rows[0][1],
-        'vendor': rows[0][3],
-        'price': rows[0][4],
-        'phone': rows[0][5],
-        'ship_by': rows[0][6],
-    }
-
-    twilio_client.create_phone_call("+12137994675", "+"+rows[0][5], agent_id)
+@app.get("/send-email/")
+def send_vendor_email(request: Request):
+    modifyPurchaseOrder(
+        'Acme Inc.',
+        'John Doe',
+        '123 Main St',
+        'San Francisco',
+        'Widget',
+        'A high-quality widget',
+        10,
+        5.00,
+        50.00)
+    send_email('updated-purchase-order.xlsx')
 
 # Only used for twilio phone call situations
 @app.post("/twilio-voice-webhook/{agent_id_path}")
@@ -95,14 +128,64 @@ async def handle_register_call(request: Request):
         print(f"Call response: {call_response}")
     except Exception as err:
         print(f"Error in register call: {err}")
-        return JSONResponse(status_code=500, content={"message": "Internal Server Error"})
+        return JSONResponse(status_code=500, content={"message": "Internal Server Error"})   
 
+def process_transcript(transcript):
+    if len(transcript) == 0:
+        print('no transcript')
+        return []
+    messages = []
+    for utterance in transcript:
+        if utterance["role"] == "agent":
+            messages.append({
+                "role": "assistant",
+                "content": utterance['content']
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": utterance['content']
+            })
+    return messages
 
+@agentops.record_function('extract_info')
+def extract_info(messages):
+    client = OpenAI()
+    
+    # todays date in the format of month/day/year
+    today = datetime.now()
+    todays_date = today.strftime("%m/%d/%Y")
+    
+    parse_transcript_prompt = \
+        f"Parse the below transcript of a call between an agent and a supplier, \
+        and extract the specified information in JSON format. \
+        1. The SKU ID of the product the agent is inquiring about with key 'sku_id'. \
+        2. The dollar quote the supplier provides with key 'quote'. \
+        3. The quantity the agent is inquiring about with key 'quantity'. \
+        4. The absolute delivery date with key 'delivery_date' \
+            (today is {todays_date}, so calculate the date if you are given an relative answer). \
+        5. The supplier's email address with key 'email'. \
+        Here is the transcript: {str(messages)}"
+    
+    completion = client.chat.completions.create(
+        model='gpt-4-turbo',
+        messages=[
+            {
+                "role": "user",
+                "content": parse_transcript_prompt
+            }
+        ],
+        response_format={'type': "json_object"}
+    )
+    resp = json.loads(completion.choices[0].message.content)
+    requests.post("http://localhost:3000/api/callback", json=resp)
+    
+    # send a post request to http://localhost:3000/
 
 # Custom LLM Websocket handler, receive audio transcription and send back text response
 @app.websocket("/llm-websocket/{call_id}")
 async def websocket_handler(websocket: WebSocket, call_id: str):
-    agentops.init(os.environ['AGENTOPS_API_KEY'])
+    agentops.start_session(tags=["llm", "websocket", "call_id:"])
     await websocket.accept()
 
     rows = []
@@ -119,6 +202,7 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         'phone': rows[0][5],
         'ship_by': rows[0][6],
         'quantity': 15,
+        'best_quote': BEST_QUOTE,
     }
 
     llm_client = LlmClient(call_info=call_info)
@@ -150,8 +234,7 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             message = await asyncio.wait_for(websocket.receive_text(), timeout=100*60) # 100 minutes
             request_json = json.loads(message)
             request: CustomLlmRequest = CustomLlmRequest(**request_json)
-            print(json.dumps(request.__dict__, indent=4))
-
+            # print(json.dumps(request.__dict__, indent=4))
             # There are 5 types of interaction_type: call_details, pingpong, update_only, response_required, and reminder_required.
             # Not all of them need to be handled, only response_required and reminder_required.
             if request.interaction_type == "call_details":
@@ -164,6 +247,7 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             if request.interaction_type == "response_required" or request.interaction_type == "reminder_required":
                 response_id = request.response_id
                 asyncio.create_task(stream_response(request))
+            messages = process_transcript(request.transcript)
     except WebSocketDisconnect:
         print(f"LLM WebSocket disconnected for {call_id}")
     except ConnectionTimeoutError as e:
@@ -171,6 +255,10 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
     except Exception as e:
         print(f"Error in LLM WebSocket: {e}")
     finally:
+        if messages is None:
+            messages = []
+        print(f"Transcript: {messages}")
+        extract_info(messages)
         print(f"LLM WebSocket connection closed for {call_id}")
-        agentops.end_session('Success!')
+        agentops.end_session('Success')
 
