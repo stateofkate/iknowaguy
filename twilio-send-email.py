@@ -54,7 +54,7 @@ def send_email(workbook_path):
         message.attachment = attachment
 
         try:
-            sg = SendGridAPIClient('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')
+            sg = SendGridAPIClient('API_KEY here')
             print(sg)
             response = sg.send(message)
             print(response)
