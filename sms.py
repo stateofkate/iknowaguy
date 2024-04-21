@@ -1,7 +1,7 @@
 from twilio.rest import Client
 
-account_sid = 'TWILIO_ACCOUNT_SID'
-auth_token = '[AuthToken]'
+account_sid = 'ACa8130ad26f12176f7a7865bd32b64c92'
+auth_token = '2e9847e39e8dd372028ceabac8cf6ee0'
 client = Client(account_sid, auth_token)
 
 
@@ -18,9 +18,9 @@ def create_sms_body(
 
 def send_sms(sms_body):
     message = client.messages.create(
-    from='+18666061424',
-    body='hello',
-    to='+19292806660'
+        from_='+18666061424',
+        body=sms_body,
+        to='+19292806660'
     )
 
     print(message.sid)
@@ -28,3 +28,7 @@ def send_sms(sms_body):
 
 #create sms body
 # pass to send_sms
+send_sms('hello world')
+
+
+
